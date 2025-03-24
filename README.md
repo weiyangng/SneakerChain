@@ -1,13 +1,13 @@
-# How to Run
+# SneakerChain
 
-1. npx hardhat node (In a seperate terminal)
-2. npx hardhat run scripts/deploy.js --network localhost
-3. node scripts/interactive.js
-4. 
-They will ask this
-PS C:\Users\ngwei\IS4302\Project> node scripts/interactive.js
-Using deployer account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-Enter the deployed contract address: 
+This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
 
-The deployed contract address is exact same as above
-eg. 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+Try running some of the following tasks:
+
+```shell
+npx hardhat help
+npx hardhat test
+REPORT_GAS=true npx hardhat test
+npx hardhat node
+npx hardhat ignition deploy ./ignition/modules/Lock.js
+```
