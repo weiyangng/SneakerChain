@@ -24,51 +24,55 @@ async function main() {
 
         const choice = readlineSync.question("Enter your choice: ");
 
-        switch (choice) {
-            case "1":
-                const username = readlineSync.question("Enter username: ");
-                const password = readlineSync.question("Enter password: ");
-                await userAuth.registerUser(deployer.address, username, password);
-                console.log("User registered successfully.");
-                break;
-            case "2":
-                const loginUsername = readlineSync.question("Enter username: ");
-                const loginPassword = readlineSync.question("Enter password: ");
-                const loginSuccess = await userAuth.loginUser(deployer.address, loginUsername, loginPassword);
-                if (loginSuccess) {
-                    loggedIn = true;
-                    console.log("User logged in successfully.");
-                } else {
-                    console.log("Login failed.");
-                }
-                break;
-            case "3":
-                if (loggedIn) {
-                    await userAuth.logoutUser(deployer.address);
-                    loggedIn = false;
-                    console.log("User logged out successfully.");
-                } else {
+        try {
+            switch (choice) {
+                case "1":
+                    const username = readlineSync.question("Enter username: ");
+                    const password = readlineSync.question("Enter password: ");
+                    await userAuth.registerUser(deployer.address, username, password);
+                    console.log("User registered successfully.");
+                    break;
+                case "2":
+                    const loginUsername = readlineSync.question("Enter username: ");
+                    const loginPassword = readlineSync.question("Enter password: ");
+                    const loginSuccess = await userAuth.loginUser(deployer.address, loginUsername, loginPassword);
+                    if (loginSuccess) {
+                        loggedIn = true;
+                        console.log("User logged in successfully.");
+                    } else {
+                        console.log("Login failed.");
+                    }
+                    break;
+                case "3":
+                    if (loggedIn) {
+                        await userAuth.logoutUser(deployer.address);
+                        loggedIn = false;
+                        console.log("User logged out successfully.");
+                    } else {
+                        console.log("Invalid choice. Please try again.");
+                    }
+                    break;
+                case "4":
+                    if (loggedIn) {
+                        await listSneaker(userAuth, deployer);
+                    } else {
+                        console.log("Invalid choice. Please try again.");
+                    }
+                    break;
+                case "5":
+                    if (loggedIn) {
+                        await buySneaker(userAuth, deployer);
+                    } else {
+                        console.log("Invalid choice. Please try again.");
+                    }
+                    break;
+                case "6":
+                    process.exit(0);
+                default:
                     console.log("Invalid choice. Please try again.");
-                }
-                break;
-            case "4":
-                if (loggedIn) {
-                    await listSneaker(userAuth, deployer);
-                } else {
-                    console.log("Invalid choice. Please try again.");
-                }
-                break;
-            case "5":
-                if (loggedIn) {
-                    await buySneaker(userAuth, deployer);
-                } else {
-                    console.log("Invalid choice. Please try again.");
-                }
-                break;
-            case "6":
-                process.exit(0);
-            default:
-                console.log("Invalid choice. Please try again.");
+            }
+        } catch (error) {
+            console.error("An error occurred:", error.message);
         }
     }
 }

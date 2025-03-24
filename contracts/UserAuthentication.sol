@@ -57,4 +57,8 @@ contract UserAuthentication is SneakerMarketplace {
         require(loggedInUsers[msg.sender], "User not logged in");
         super.purchaseSneaker(sneakerId);
     }
+
+    function getAllSneakers() public view override returns (uint256[] memory, string[] memory, uint256[] memory, address[] memory) {
+        return super.getAllSneakers();
+    }
 }

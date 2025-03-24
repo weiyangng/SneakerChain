@@ -41,11 +41,21 @@ contract SneakerMarketplace {
         return (sneaker.name, sneaker.price, sneaker.owner);
     }
 
-    function getAllSneakers() public view returns (Sneaker[] memory) {
-        Sneaker[] memory allSneakers = new Sneaker[](nextSneakerId);
-        for (uint256 i = 0; i < nextSneakerId; i++) {
-            allSneakers[i] = sneakers[i];
+    function getAllSneakers() public view virtual returns (uint256[] memory ids, string[] memory names, uint256[] memory prices, address[] memory owners) {
+        uint256 length = nextSneakerId;
+        ids = new uint256[](length);
+        names = new string[](length);
+        prices = new uint256[](length);
+        owners = new address[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            Sneaker storage sneaker = sneakers[i];
+            ids[i] = sneaker.id;
+            names[i] = sneaker.name;
+            prices[i] = sneaker.price;
+            owners[i] = sneaker.owner;
         }
-        return allSneakers;
+
+        return (ids, names, prices, owners);
     }
 }
