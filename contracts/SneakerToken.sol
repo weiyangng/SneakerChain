@@ -71,7 +71,10 @@ contract SneakerToken is ERC1155URIStorage {
         uint256 tokenId,
         uint256 amount
     ) public sneakerOwner(tokenId) validToken(tokenId) {
-        require(balanceOf(msg.sender, tokenId) >= amount);
+        require(
+            balanceOf(msg.sender, tokenId) >= amount,
+            "Insufficent balance to sell"
+        );
         safeTransferFrom(msg.sender, to, tokenId, amount, "");
         if (!isSneakerOwner[tokenId][to]) {
             sneakerOwners[tokenId].push(to);
@@ -85,7 +88,10 @@ contract SneakerToken is ERC1155URIStorage {
         uint256 tokenId,
         uint256 amount
     ) public sneakerOwner(tokenId) validToken(tokenId) {
-        require(balanceOf(msg.sender, tokenId) >= amount);
+        require(
+            balanceOf(msg.sender, tokenId) >= amount,
+            "Insufficient balance to transfer to market"
+        );
         safeTransferFrom(msg.sender, to, tokenId, amount, "");
     }
 
@@ -93,15 +99,19 @@ contract SneakerToken is ERC1155URIStorage {
         uint256 tokenId,
         uint256 amount
     ) public sneakerOwner(tokenId) validToken(tokenId) {
-        require(balanceOf(msg.sender, tokenId) >= amount);
+        require(
+            balanceOf(msg.sender, tokenId) >= amount,
+            "Insufficient amount to burn"
+        );
         _burn(msg.sender, tokenId, amount);
         emit BurnSNKT(msg.sender, tokenId, amount);
     }
 
     function isOwnerOfSneaker(
-        uint256 tokenId
+        uint256 tokenId,
+        address _address
     ) public view validToken(tokenId) returns (bool) {
-        return isSneakerOwner[tokenId][msg.sender];
+        return isSneakerOwner[tokenId][_address];
     }
 
     function getSneakerMetadata(
