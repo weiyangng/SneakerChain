@@ -6,6 +6,7 @@ contract SneakerMarketplace {
     SneakerToken sneakerTokenContract;
     uint256 public commissionFee;
     address public _owner;
+    uint256[] public activeListingIds;
 
     struct Listing {
         address seller;
@@ -45,6 +46,8 @@ contract SneakerMarketplace {
             price: price,
             shareAmt: amount
         });
+        activeListingIds.push(tokenId);
+        emit SneakerListed(tokenId, msg.sender, price);
     }
 
     function unlistSneaker(uint256 tokenId) public {
@@ -56,40 +59,63 @@ contract SneakerMarketplace {
             tokenId,
             listing.shareAmt
         );
+        for (uint256 i = 0; i < activeListingIds.length; i++) {
+            if (activeListingIds[i] == tokenId) {
+                activeListingIds[i] = activeListingIds[
+                    activeListingIds.length - 1
+                ];
+                activeListingIds.pop();
+                break;
+            }
+        }
         delete listings[tokenId];
     }
 
-    function purchaseSneaker(uint256 tokenId) public payable virtual {}
+    function purchaseSneaker(uint256 tokenId, uint256 amount) public payable {
+        Listing memory listing = listings[tokenId];
+        uint256 totalPrice = listing.price * amount;
+        require(listing.price > 0, "This listing does not exist");
+        require(
+            amount <= listing.shareAmt,
+            "Insufficent sneaker shares remaining"
+        );
+        require(
+            msg.value >= totalPrice + ((totalPrice * commissionFee) / 100),
+            "Insufficent funds to purchase this sneaker"
+        );
+        address payable seller = payable(listing.seller);
+        seller.transfer(totalPrice);
+        sneakerTokenContract.transferSneakerToken(msg.sender, tokenId, amount);
+        delete listings[tokenId];
+        emit SneakerPurchased(tokenId, msg.sender, seller, totalPrice);
+    }
 
-    function getSneaker(
-        uint256 sneakerId
-    ) public view returns (string memory name, uint256 price, address owner) {}
+    function checkValue(uint256 tokenId) public view returns (uint256) {
+        Listing memory listing = listings[tokenId];
+        require(listing.price > 0, "This listing does not exist");
+        return listing.price;
+    }
 
-    // function getAllSneakers()
-    //     public
-    //     view
-    //     virtual
-    //     returns (
-    //         uint256[] memory ids,
-    //         string[] memory names,
-    //         uint256[] memory prices,
-    //         address[] memory owners
-    //     )
-    // {
-    //     uint256 length = nextSneakerId;
-    //     ids = new uint256[](length);
-    //     names = new string[](length);
-    //     prices = new uint256[](length);
-    //     owners = new address[](length);
+    function checkAvailableShareAmount(
+        uint256 tokenId
+    ) public view returns (uint256) {
+        Listing memory listing = listings[tokenId];
+        require(listing.price > 0, "This listing does not exist");
+        return listing.shareAmt;
+    }
 
-    //     for (uint256 i = 0; i < length; i++) {
-    //         Sneaker storage sneaker = sneakers[i];
-    //         ids[i] = sneaker.id;
-    //         names[i] = sneaker.name;
-    //         prices[i] = sneaker.price;
-    //         owners[i] = sneaker.owner;
-    //     }
+    function getListing(uint256 tokenId) public view returns (Listing memory) {
+        Listing memory listing = listings[tokenId];
+        require(listing.price > 0, "This listing does not exist");
+        return listing;
+    }
 
-    //     return (ids, names, prices, owners);
-    // }
+    function getAllListings() public view returns (Listing[] memory) {
+        Listing[] memory result = new Listing[](activeListingIds.length);
+        for (uint256 i = 0; i < activeListingIds.length; i++) {
+            uint256 tokenId = activeListingIds[i];
+            result[i] = listings[tokenId];
+        }
+        return result;
+    }
 }
