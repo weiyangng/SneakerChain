@@ -12,15 +12,59 @@ contract SneakerMarketplace {
         address seller;
         uint256 price;
         uint256 shareAmt;
+        bool bidProcess;
+        uint256 bidEndTime;
     }
-    mapping(uint256 => Listing) public listings;
 
-    event SneakerListed(uint256 tokenId, address seller, uint256 price);
+    struct Bid {
+        address bidder;
+        uint256 bidAmount;
+        uint256 bidPrice;
+        uint256 timestamp;
+    }
+
+    mapping(uint256 => Listing) public listings;
+    mapping(uint256 => Bid) public currentBid;
+    mapping(uint256 => bool) public isBiddingActive;
+    mapping(uint256 => uint256) public bidEndTime;
+
+    event SneakerListed(
+        uint256 tokenId,
+        address seller,
+        uint256 amount,
+        uint256 price
+    );
     event SneakerPurchased(
         uint256 tokenId,
         address buyer,
         address seller,
+        uint256 amount,
         uint256 price
+    );
+    event InitialBidSubmitted(
+        uint256 tokenId,
+        address bidder,
+        uint256 bidAmount,
+        uint256 bidPrice
+    );
+    event BidAccepted(
+        uint256 tokenId,
+        address bidder,
+        uint256 bidAmount,
+        uint256 bidPrice,
+        uint256 expiry
+    );
+    event BidPlaced(
+        uint256 tokenId,
+        address newBidder,
+        uint256 bidAmount,
+        uint256 newBidPrice
+    );
+    event BidSucceeded(
+        uint256 tokenId,
+        address winningBidder,
+        uint256 amount,
+        uint256 finalBidPrice
     );
 
     constructor(SneakerToken sneakerTokenAddress, uint256 fee) {
@@ -44,10 +88,12 @@ contract SneakerMarketplace {
         listings[tokenId] = Listing({
             seller: msg.sender,
             price: price,
-            shareAmt: amount
+            shareAmt: amount,
+            bidProcess: false,
+            bidEndTime: 0
         });
         activeListingIds.push(tokenId);
-        emit SneakerListed(tokenId, msg.sender, price);
+        emit SneakerListed(tokenId, msg.sender, amount, price);
     }
 
     function unlistSneaker(uint256 tokenId) public {
@@ -86,8 +132,48 @@ contract SneakerMarketplace {
         address payable seller = payable(listing.seller);
         seller.transfer(totalPrice);
         sneakerTokenContract.transferSneakerToken(msg.sender, tokenId, amount);
-        delete listings[tokenId];
-        emit SneakerPurchased(tokenId, msg.sender, seller, totalPrice);
+        if (amount < listing.shareAmt) {
+            listings[tokenId].shareAmt -= amount;
+        } else {
+            for (uint256 i = 0; i < activeListingIds.length; i++) {
+                if (activeListingIds[i] == tokenId) {
+                    activeListingIds[i] = activeListingIds[
+                        activeListingIds.length - 1
+                    ];
+                    activeListingIds.pop();
+                    break;
+                }
+            }
+            delete listings[tokenId];
+        }
+        emit SneakerPurchased(tokenId, msg.sender, seller, amount, totalPrice);
+    }
+
+    //  need to implement 3 minute rule for last minute bids
+    function placeBid(uint256 tokenId, uint256 amount, uint256 price) public {
+        Listing memory listing = listings[tokenId];
+        require(listing.price > 0, "This listing does not exist");
+        require(
+            price > currentBid[tokenId].bidPrice,
+            "Bid must be higher than current bid price"
+        );
+        if (currentBid[tokenId].bidPrice > 0) {
+            currentBid[tokenId] = Bid(
+                msg.sender,
+                amount,
+                price,
+                block.timestamp
+            );
+            emit InitialBidSubmitted(tokenId, msg.sender, amount, price);
+        } else {
+            currentBid[tokenId] = Bid(
+                msg.sender,
+                amount,
+                price,
+                block.timestamp
+            );
+            emit BidPlaced(tokenId, msg.sender, amount, price);
+        }
     }
 
     function checkValue(uint256 tokenId) public view returns (uint256) {
