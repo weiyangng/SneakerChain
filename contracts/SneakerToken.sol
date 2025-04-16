@@ -57,11 +57,13 @@ contract SneakerToken is ERC1155URIStorage {
         uint256 amount,
         string memory metadataURI
     ) public onlyOwner returns (uint256) {
-        uint256 newTokenId = _tokenIds++;
+        _tokenIds++;
+        uint256 newTokenId = _tokenIds;
         _mint(to, newTokenId, amount, "");
         _setURI(newTokenId, metadataURI);
         maxShares[newTokenId] = amount;
         sneakerOwners[newTokenId].push(to);
+        isSneakerOwner[newTokenId][to] = true;
         emit MintSNKT(to, newTokenId, amount, metadataURI);
         return newTokenId;
     }
@@ -80,19 +82,30 @@ contract SneakerToken is ERC1155URIStorage {
             sneakerOwners[tokenId].push(to);
             isSneakerOwner[tokenId][to] = true;
         }
+        if (balanceOf(msg.sender, tokenId) == 0) {
+            isSneakerOwner[tokenId][msg.sender] = false;
+        }
         emit TransferSNKT(msg.sender, to, tokenId, amount);
     }
 
     function transferToMarket(
         address to,
         uint256 tokenId,
-        uint256 amount
-    ) public sneakerOwner(tokenId) validToken(tokenId) {
+        uint256 amount,
+        address originalOwner
+    ) public {
         require(
-            balanceOf(msg.sender, tokenId) >= amount,
+            balanceOf(originalOwner, tokenId) >= amount,
             "Insufficient balance to transfer to market"
         );
-        safeTransferFrom(msg.sender, to, tokenId, amount, "");
+        safeTransferFrom(originalOwner, to, tokenId, amount, "");
+        if (!isSneakerOwner[tokenId][to]) {
+            sneakerOwners[tokenId].push(to);
+            isSneakerOwner[tokenId][to] = true;
+        }
+        if (balanceOf(originalOwner, tokenId) == 0) {
+            isSneakerOwner[tokenId][originalOwner] = false;
+        }
     }
 
     function burnSneakerToken(

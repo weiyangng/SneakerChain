@@ -2,11 +2,18 @@ async function main() {
     const [deployer] = await ethers.getSigners();
     console.log("Deploying contracts with the account:", deployer.address);
 
-    const UserAuthentication = await ethers.getContractFactory("UserAuthentication");
-    const userAuth = await UserAuthentication.deploy();
-    await userAuth.waitForDeployment();
+    // Deploy SneakerToken
+    const SneakerToken = await ethers.getContractFactory("SneakerToken");
+    const sneakerToken = await SneakerToken.deploy();
+    await sneakerToken.waitForDeployment();
+    console.log("SneakerToken deployed to:", await sneakerToken.getAddress());
 
-    console.log("UserAuthentication deployed to:", await userAuth.getAddress());
+    // Deploy SneakerMarketplace with 5% commission fee
+    const commissionFee = 5;
+    const SneakerMarketplace = await ethers.getContractFactory("SneakerMarketplace");
+    const marketplace = await SneakerMarketplace.deploy(await sneakerToken.getAddress(), commissionFee);
+    await marketplace.waitForDeployment();
+    console.log("SneakerMarketplace deployed to:", await marketplace.getAddress());
 }
 
 main()

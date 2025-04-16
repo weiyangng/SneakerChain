@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 import "./SneakerToken.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 
-contract SneakerMarketplace {
+contract SneakerMarketplace is IERC1155Receiver {
     SneakerToken sneakerTokenContract;
     uint256 public commissionFee;
     address public _owner;
@@ -73,6 +74,30 @@ contract SneakerMarketplace {
         _owner = msg.sender;
     }
 
+    function onERC1155Received(
+        address operator,
+        address from,
+        uint256 id,
+        uint256 value,
+        bytes calldata data
+    ) external pure returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(
+        address operator,
+        address from,
+        uint256[] calldata ids,
+        uint256[] calldata values,
+        bytes calldata data
+    ) external pure returns (bytes4) {
+        return this.onERC1155BatchReceived.selector;
+    }
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IERC1155Receiver).interfaceId;
+    }
+
     function listSneaker(
         uint256 tokenId,
         uint256 amount,
@@ -84,7 +109,7 @@ contract SneakerMarketplace {
             sneakerTokenContract.isOwnerOfSneaker(tokenId, msg.sender),
             "Only owners can list their tokens"
         );
-        sneakerTokenContract.transferToMarket(address(this), tokenId, amount);
+        sneakerTokenContract.transferToMarket(address(this), tokenId, amount, msg.sender);
         listings[tokenId] = Listing({
             seller: msg.sender,
             price: price,
@@ -157,21 +182,19 @@ contract SneakerMarketplace {
             price > currentBid[tokenId].bidPrice,
             "Bid must be higher than current bid price"
         );
-        if (currentBid[tokenId].bidPrice > 0) {
-            currentBid[tokenId] = Bid(
-                msg.sender,
-                amount,
-                price,
-                block.timestamp
-            );
+        
+        // Store the current bid
+        currentBid[tokenId] = Bid(
+            msg.sender,
+            amount,
+            price,
+            block.timestamp
+        );
+
+        // Emit appropriate event based on whether this is the first bid
+        if (currentBid[tokenId].bidPrice == price) {
             emit InitialBidSubmitted(tokenId, msg.sender, amount, price);
         } else {
-            currentBid[tokenId] = Bid(
-                msg.sender,
-                amount,
-                price,
-                block.timestamp
-            );
             emit BidPlaced(tokenId, msg.sender, amount, price);
         }
     }
