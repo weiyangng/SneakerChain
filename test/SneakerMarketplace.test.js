@@ -251,4 +251,93 @@ describe("SneakerMarketplace", function () {
             ).to.be.revertedWith("Only seller can unlist");
         });
     });
+
+    describe("Finalising Bids", function () {
+        it("Should allow the seller to finalize a bid and transfer funds and shares", async function () {
+            // Mint and list a sneaker
+            const tokenId = await mintSneaker(
+                owner.address,
+                100,
+                "ipfs://QmTestMetadata"
+            );
+            await marketplace.listSneaker(tokenId, 50, ethers.parseEther("1.0"));
+        
+            // Place a bid (no funds sent yet)
+            const bidAmount = 25;
+            const bidPricePerShare = ethers.parseEther("1.2");
+            await marketplace.connect(addr1).placeBid(tokenId, bidAmount, bidPricePerShare);
+        
+            // Finalize the bid (buyer should pay here)
+            await marketplace.connect(owner).finaliseBid(tokenId)
+
+        
+            // Check the bidder's token balance
+            const bidderBalance = await sneakerToken.balanceOf(addr1.address, tokenId);
+            console.log("Bidder's balance after finalizing bid:", bidderBalance.toString());
+            console.log("Bid amount:", bidAmount.toString());
+            expect(bidderBalance).to.equal(bidAmount);
+        });
+    
+        it("Should remove the listing if all shares are sold", async function () {
+            // Mint and list a sneaker
+            const tokenId = await mintSneaker(
+                owner.address,
+                100,
+                "ipfs://QmTestMetadata"
+            );
+            await marketplace.listSneaker(tokenId, 50, ethers.parseEther("1.0"));
+    
+            // Place a bid for all shares
+            const bidAmount = 50;
+            const bidPricePerShare = ethers.parseEther("1.2");
+            await marketplace.connect(addr1).placeBid(tokenId, bidAmount, bidPricePerShare);
+    
+            // Finalize the bid
+            await marketplace.finaliseBid(tokenId);
+    
+            // Check that the listing is removed
+            await expect(marketplace.getListing(tokenId)).to.be.revertedWith(
+                "This listing does not exist"
+            );
+    
+            // Check that the token is no longer in active listings
+            const activeListings = await marketplace.getAllListings();
+            expect(activeListings.length).to.equal(0);
+        });
+    
+        it("Should not allow non-sellers to finalize a bid", async function () {
+            // Mint and list a sneaker
+            const tokenId = await mintSneaker(
+                owner.address,
+                100,
+                "ipfs://QmTestMetadata"
+            );
+            await marketplace.listSneaker(tokenId, 50, ethers.parseEther("1.0"));
+    
+            // Place a bid
+            const bidAmount = 25;
+            const bidPricePerShare = ethers.parseEther("1.2");
+            await marketplace.connect(addr1).placeBid(tokenId, bidAmount, bidPricePerShare);
+    
+            // Attempt to finalize the bid as a non-seller
+            await expect(
+                marketplace.connect(addr1).finaliseBid(tokenId)
+            ).to.be.revertedWith("Only the seller can finalize the bid");
+        });
+    
+        it("Should not allow finalizing a bid if no active bid exists", async function () {
+            // Mint and list a sneaker
+            const tokenId = await mintSneaker(
+                owner.address,
+                100,
+                "ipfs://QmTestMetadata"
+            );
+            await marketplace.listSneaker(tokenId, 50, ethers.parseEther("1.0"));
+    
+            // Attempt to finalize the bid without any active bids
+            await expect(
+                marketplace.finaliseBid(tokenId)
+            ).to.be.revertedWith("No active bid to finalize");
+        });
+    });
 }); 
