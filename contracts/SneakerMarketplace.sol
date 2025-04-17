@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 import "./SneakerToken.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
+import "hardhat/console.sol";
 
 contract SneakerMarketplace is IERC1155Receiver {
     SneakerToken sneakerTokenContract;
@@ -175,7 +176,7 @@ contract SneakerMarketplace is IERC1155Receiver {
     }
 
     //  need to implement 3 minute rule for last minute bids
-    function placeBid(uint256 tokenId, uint256 amount, uint256 price) public {
+    function placeBid(uint256 tokenId, uint256 amount, uint256 price) public payable {
         Listing memory listing = listings[tokenId];
         require(listing.price > 0, "This listing does not exist");
         require(
@@ -184,6 +185,8 @@ contract SneakerMarketplace is IERC1155Receiver {
         );
         
         // Store the current bid
+        uint256 previousBidPrice = currentBid[tokenId].bidPrice;
+
         currentBid[tokenId] = Bid(
             msg.sender,
             amount,
@@ -191,8 +194,7 @@ contract SneakerMarketplace is IERC1155Receiver {
             block.timestamp
         );
 
-        // Emit appropriate event based on whether this is the first bid
-        if (currentBid[tokenId].bidPrice == price) {
+        if (previousBidPrice == 0) {
             emit InitialBidSubmitted(tokenId, msg.sender, amount, price);
         } else {
             emit BidPlaced(tokenId, msg.sender, amount, price);
@@ -227,4 +229,45 @@ contract SneakerMarketplace is IERC1155Receiver {
         }
         return result;
     }
+
+    function finaliseBid(uint256 tokenId) public {
+    Listing memory listing = listings[tokenId];
+    Bid memory winningBid = currentBid[tokenId];
+
+    require(listing.price > 0, "This listing does not exist");
+    require(listing.seller == msg.sender, "Only the seller can finalize the bid");
+    require(winningBid.bidPrice > 0, "No active bid to finalize");
+
+    // Transfer sneaker shares to the winning bidder first
+    sneakerTokenContract.transferSneakerToken(
+        winningBid.bidder,
+        tokenId,
+        winningBid.bidAmount
+    );
+
+    // Update the listing or remove it if all shares are sold
+    if (winningBid.bidAmount < listing.shareAmt) {
+        listings[tokenId].shareAmt -= winningBid.bidAmount;
+    } else {
+        // Remove the listing from active listings
+        for (uint256 i = 0; i < activeListingIds.length; i++) {
+            if (activeListingIds[i] == tokenId) {
+                activeListingIds[i] = activeListingIds[activeListingIds.length - 1];
+                activeListingIds.pop();
+                break;
+            }
+        }
+        delete listings[tokenId];
+    }
+
+    // Clear the current bid
+    delete currentBid[tokenId];
+
+    emit BidSucceeded(
+        tokenId,
+        winningBid.bidder,
+        winningBid.bidAmount,
+        winningBid.bidPrice
+    );
+}
 }
