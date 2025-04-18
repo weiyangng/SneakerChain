@@ -46,108 +46,276 @@ async function main() {
                 switch (choice) {
                     case "1":
                         const amount = readlineSync.question("Enter amount of shares: ");
-                        const metadata = readlineSync.question("Enter metadata URI: ");
+                        const metadata = readlineSync.question("Enter shoe listing title: ");
                         const tx = await sneakerToken.mintSneakerToken(deployer.address, amount, metadata);
-                        await tx.wait();
-                        console.log("Sneaker minted successfully.");
+                        const receipt = await tx.wait();
+
+                        // Parse the tokenId from the Mint event
+                        const mintEvent = receipt.logs.find(log =>
+                            log.fragment && log.fragment.name === "TransferSingle"
+                        );
+
+                        if (mintEvent) {
+                            const tokenId = mintEvent.args.id;
+                            console.log(`Sneaker minted successfully. Token ID: ${tokenId}`);
+                        } else {
+                            console.log("Sneaker minted successfully. (Token ID could not be retrieved from logs)");
+                        }
                         break;
+
                     case "2":
                         const tokenId = readlineSync.question("Enter token ID: ");
                         const listAmount = readlineSync.question("Enter amount to list: ");
                         const price = readlineSync.question("Enter price per share (in ETH): ");
-                        
-                        // Check if user owns the token
+                    
+                        // Ownership check
                         const isOwner = await sneakerToken.isOwnerOfSneaker(tokenId, deployer.address);
                         if (!isOwner) {
-                            console.error("Error: You do not own this sneaker token");
+                            console.error("You do not own this sneaker token.");
                             break;
                         }
-
-                        // Check user's balance
+                    
+                        // Balance check
                         const balance = await sneakerToken.balanceOf(deployer.address, tokenId);
                         if (balance < listAmount) {
-                            console.error(`Error: You only have ${balance} shares, but trying to list ${listAmount}`);
+                            console.error(`Insufficient shares. You own ${balance}, but tried to list ${listAmount}.`);
                             break;
                         }
-
-                        // Approve marketplace if not already approved
+                    
+                        // Approval check
                         const isApproved = await sneakerToken.isApprovedForAll(deployer.address, marketplace.target);
                         if (!isApproved) {
-                            console.log("Approving marketplace to handle your tokens...");
+                            console.log("Approving marketplace to manage your tokens...");
                             const approveTx = await sneakerToken.setApprovalForAll(marketplace.target, true);
                             await approveTx.wait();
+                            console.log("Marketplace approved.");
                         }
-
-                        // List the sneaker
-                        const listTx = await marketplace.listSneaker(
-                            tokenId,
-                            listAmount,
-                            hre.ethers.parseEther(price)
-                        );
-                        await listTx.wait();
-                        console.log("Sneaker listed successfully.");
+                    
+                        try {
+                            const priceInWei = hre.ethers.parseEther(price);
+                            const listTx = await marketplace.listSneaker(tokenId, listAmount, priceInWei);
+                            await listTx.wait();
+                    
+                            console.log("\nSneaker listed successfully!");
+                            console.log(`Token ID: ${tokenId}`);
+                            console.log(`Shares Listed: ${listAmount}`);
+                            console.log(`Price per Share: ${price} ETH`);
+                            console.log(`Listing Contract: ${marketplace.target}`);
+                        } catch (err) {
+                            console.error(" Listing failed:", err.message);
+                        }
                         break;
+                            
                     case "3":
                         const buyTokenId = readlineSync.question("Enter token ID: ");
                         const buyAmount = readlineSync.question("Enter amount to buy: ");
-                        const listing = await marketplace.getListing(buyTokenId);
-                        const totalPrice = listing.price * BigInt(buyAmount);
-                        const commission = (totalPrice * BigInt(5)) / BigInt(100);
-                        const buyTx = await marketplace.purchaseSneaker(buyTokenId, buyAmount, {
-                            value: totalPrice + commission
-                        });
-                        await buyTx.wait();
-                        console.log("Sneaker purchased successfully.");
-                        break;
-                    case "4":
-                        const bidTokenId = readlineSync.question("Enter token ID: ");
-                        const bidAmount = readlineSync.question("Enter bid amount: ");
-                        const bidPrice = readlineSync.question("Enter bid price per share (in ETH): ");
-                        const bidTx = await marketplace.placeBid(
-                            bidTokenId,
-                            bidAmount,
-                            hre.ethers.parseEther(bidPrice)
-                        );
-                        await bidTx.wait();
-                        console.log("Bid placed successfully.");
-                        break;
-                    case "5":
-                        const unlistTokenId = readlineSync.question("Enter token ID: ");
-                        const unlistTx = await marketplace.unlistSneaker(unlistTokenId);
-                        await unlistTx.wait();
-                        console.log("Sneaker unlisted successfully.");
-                        break;
-                    case "6":
+                    
                         try {
-                            const checkTokenId = readlineSync.question("Enter token ID: ");
-                            const checkListing = await marketplace.getListing(checkTokenId);
-                            
-                            if (checkListing.price === 0n) {
+                            const listing = await marketplace.getListing(buyTokenId);
+                    
+                            if (listing.price === 0n || listing.shareAmt === 0n) {
+                                console.log("No active listing found for this token ID.");
+                                break;
+                            }
+                    
+                            if (listing.shareAmt < BigInt(buyAmount)) {
+                                console.log(`Only ${listing.shareAmt} shares available. You requested ${buyAmount}.`);
+                                break;
+                            }
+                    
+                            const pricePerShare = listing.price;
+                            const totalPrice = pricePerShare * BigInt(buyAmount);
+                            const commission = (totalPrice * 5n) / 100n;
+                            const totalToPay = totalPrice + commission;
+                    
+                            console.log("\nPurchase Summary");
+                            console.log("---------------------");
+                            console.log(`Token ID: ${buyTokenId}`);
+                            console.log(`Shares: ${buyAmount}`);
+                            console.log(`Price per share: ${hre.ethers.formatEther(pricePerShare)} ETH`);
+                            console.log(`Total (including 5% commission): ${hre.ethers.formatEther(totalToPay)} ETH`);
+                            console.log(`Seller: ${listing.seller}`);
+                            console.log("");
+                    
+                            const confirm = readlineSync.question("Proceed with purchase? (yes/no): ");
+                            if (confirm.toLowerCase() !== "yes") {
+                                console.log("Purchase cancelled.");
+                                break;
+                            }
+                    
+                            const buyTx = await marketplace.purchaseSneaker(buyTokenId, buyAmount, {
+                                value: totalToPay
+                            });
+                            await buyTx.wait();
+                    
+                            console.log("Sneaker purchased successfully.");
+                        } catch (err) {
+                            if (err.message.includes("This listing does not exist")) {
                                 console.log("No active listing found for this token ID.");
                             } else {
-                                console.log("\nListing details:");
-                                console.log("----------------");
-                                console.log(`Seller: ${checkListing.seller}`);
-                                console.log(`Price per share: ${hre.ethers.formatEther(checkListing.price)} ETH`);
-                                console.log(`Available shares: ${checkListing.shareAmt}`);
-                                console.log(`Bidding process: ${checkListing.bidProcess ? "Active" : "Inactive"}`);
-                                if (checkListing.bidProcess) {
-                                    console.log(`Bid end time: ${new Date(checkListing.bidEndTime * 1000).toLocaleString()}`);
+                                console.error("Purchase failed:", err.message);
+                            }
+                        }
+                        break;
+
+                    case "4":
+                        const bidTokenId = readlineSync.question("Enter token ID: ");
+                        const bidAmount = readlineSync.question("Enter bid amount (number of shares): ");
+                        const bidPrice = readlineSync.question("Enter bid price per share (in ETH): ");
+                    
+                        try {
+                            const listing = await marketplace.getListing(bidTokenId);
+                    
+                            if (listing.price === 0n || !listing.bidProcess) {
+                                console.log("This token is not currently accepting bids.");
+                                break;
+                            }
+                    
+                            const currentTime = Math.floor(Date.now() / 1000);
+                            if (listing.bidEndTime < currentTime) {
+                                console.log("The bidding period for this token has ended.");
+                                break;
+                            }
+                    
+                            // Fetch current highest bid if contract supports it
+                            let highestBidPerShare = null;
+                            try {
+                                const highestBid = await marketplace.getHighestBid(bidTokenId);
+                                highestBidPerShare = highestBid.bidPrice;
+                                console.log(`Current highest bid per share: ${hre.ethers.formatEther(highestBidPerShare)} ETH`);
+                            } catch {
+                                console.log("No bids have been placed yet.");
+                            }
+                    
+                            const userBidPrice = hre.ethers.parseEther(bidPrice);
+                            if (highestBidPerShare !== null && userBidPrice <= highestBidPerShare) {
+                                const minIncrement = hre.ethers.parseEther("0.01");
+                                if ((userBidPrice - highestBidPerShare) < minIncrement) {
+                                    console.log("Your bid must be at least 0.01 ETH higher than the current highest bid.");
+                                    break;
                                 }
                             }
+                    
+                            const totalBid = userBidPrice * BigInt(bidAmount);
+                            console.log("\nBid Summary");
+                            console.log("-----------");
+                            console.log(`Token ID: ${bidTokenId}`);
+                            console.log(`Shares to Bid: ${bidAmount}`);
+                            console.log(`Price per Share: ${bidPrice} ETH`);
+                            console.log(`Total Bid: ${hre.ethers.formatEther(totalBid)} ETH`);
+                            console.log(`Bid Ends: ${new Date(listing.bidEndTime * 1000).toLocaleString()}`);
+                            console.log("");
+                    
+                            const confirm = readlineSync.question("Place this bid? (yes/no): ");
+                            if (confirm.toLowerCase() !== "yes") {
+                                console.log("Bid cancelled.");
+                                break;
+                            }
+                    
+                            const bidTx = await marketplace.placeBid(
+                                bidTokenId,
+                                bidAmount,
+                                userBidPrice
+                            );
+                            await bidTx.wait();
+                    
+                            console.log("Bid placed successfully.");
+                        } catch (error) {
+                            console.error("Bid failed:", error.message);
+                        }
+                        break;
+
+                    case "5":
+                        const unlistTokenId = readlineSync.question("Enter token ID: ");
+                    
+                        try {
+                            const listing = await marketplace.getListing(unlistTokenId);
+                    
+                            if (listing.price === 0n && listing.shareAmt === 0n) {
+                                console.log("No active listing found for this token ID.");
+                                break;
+                            }
+                    
+                            if (listing.seller.toLowerCase() !== deployer.address.toLowerCase()) {
+                                console.log("You are not the seller of this listing and cannot unlist it.");
+                                break;
+                            }
+                    
+                            console.log("\nListing Summary");
+                            console.log("-----------------");
+                            console.log(`Token ID: ${unlistTokenId}`);
+                            console.log(`Seller: ${listing.seller}`);
+                            console.log(`Price per Share: ${hre.ethers.formatEther(listing.price)} ETH`);
+                            console.log(`Shares Listed: ${listing.shareAmt}`);
+                            console.log("");
+                    
+                            const confirm = readlineSync.question("Do you want to unlist this sneaker? (yes/no): ");
+                            if (confirm.toLowerCase() !== "yes") {
+                                console.log("Unlisting cancelled.");
+                                break;
+                            }
+                    
+                            const unlistTx = await marketplace.unlistSneaker(unlistTokenId);
+                            await unlistTx.wait();
+                    
+                            console.log("Sneaker unlisted successfully.");
                         } catch (error) {
                             if (error.message.includes("This listing does not exist")) {
                                 console.log("No active listing found for this token ID.");
                             } else {
-                                throw error;
+                                console.error("Unlisting failed:", error.message);
                             }
                         }
                         break;
+
+                    case "6":
+                        try {
+                            const checkTokenId = readlineSync.question("Enter token ID: ");
+                    
+                            if (isNaN(checkTokenId) || Number(checkTokenId) <= 0) {
+                                console.log("Invalid token ID.");
+                                break;
+                            }
+                    
+                            const listing = await marketplace.getListing(checkTokenId);
+                    
+                            if (listing.price === 0n && listing.shareAmt === 0n) {
+                                console.log("No active listing found for this token ID.");
+                                break;
+                            }
+                    
+                            console.log("\nListing Details");
+                            console.log("------------------");
+                            console.log(`Token ID: ${checkTokenId}`);
+                            console.log(`Seller: ${listing.seller}`);
+                            console.log(`Price per Share: ${hre.ethers.formatEther(listing.price)} ETH`);
+                            console.log(`Available Shares: ${listing.shareAmt}`);
+                            console.log(`Bidding Status: ${listing.bidProcess ? "Active" : "Inactive"}`);
+                    
+                            if (listing.bidProcess) {
+                                const bidEnd = new Date(listing.bidEndTime * 1000);
+                                console.log(`Bid End Time: ${bidEnd.toLocaleString()}`);
+                            }
+                    
+                            const isSeller = listing.seller.toLowerCase() === deployer.address.toLowerCase();
+                            console.log(`You are ${isSeller ? "" : "not "}the seller of this listing.`);
+                    
+                        } catch (error) {
+                            if (error.message.includes("This listing does not exist")) {
+                                console.log("No active listing found for this token ID.");
+                            } else {
+                                console.error("Failed to retrieve listing:", error.message);
+                            }
+                        }
+                        break;
+
                     case "7":
                         await viewMintedSneakers(sneakerToken, deployer.address);
                         break;
+
                     case "8":
                         process.exit(0);
+                        
                     default:
                         console.log("Invalid choice. Please try again.");
                 }
