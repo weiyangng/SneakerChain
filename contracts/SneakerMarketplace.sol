@@ -16,6 +16,7 @@ contract SneakerMarketplace is IERC1155Receiver {
         uint256 shareAmt;
         bool bidProcess;
         uint256 bidEndTime;
+        bool isFractional;
     }
 
     struct Bid {
@@ -29,6 +30,7 @@ contract SneakerMarketplace is IERC1155Receiver {
     mapping(uint256 => Bid) public currentBid;
     mapping(uint256 => bool) public isBiddingActive;
     mapping(uint256 => uint256) public bidEndTime;
+    mapping(uint256 => Bid[]) public bids;
 
     event SneakerListed(
         uint256 tokenId,
@@ -69,6 +71,11 @@ contract SneakerMarketplace is IERC1155Receiver {
         uint256 finalBidPrice
     );
 
+    event SneakerRedeemed(
+        uint256 tokenId, 
+        address redeemer
+    );
+
     constructor(SneakerToken sneakerTokenAddress, uint256 fee) {
         sneakerTokenContract = sneakerTokenAddress;
         commissionFee = fee;
@@ -102,7 +109,8 @@ contract SneakerMarketplace is IERC1155Receiver {
     function listSneaker(
         uint256 tokenId,
         uint256 amount,
-        uint256 price
+        uint256 price,
+        bool isFractional
     ) public {
         require(price > 0, "Price must be greater than 0");
         require(amount > 0, "Must list at least one share");
@@ -110,15 +118,32 @@ contract SneakerMarketplace is IERC1155Receiver {
             sneakerTokenContract.isOwnerOfSneaker(tokenId, msg.sender),
             "Only owners can list their tokens"
         );
-        sneakerTokenContract.transferToMarket(address(this), tokenId, amount, msg.sender);
+
+        if (isFractional) {
+            require(amount == 1, "Only one token can be split into shares");
+            // First transfer the token to the marketplace
+            sneakerTokenContract.transferToMarket(address(this), tokenId, amount, msg.sender);
+            // Then split it into 100 shares
+            sneakerTokenContract.splitSneakerToken(tokenId, 100, address(this));
+            amount = 100; // Update amount to reflect the fractional shares
+        } else {
+            require(amount == 1, "Only one token can be listed as non-fractional");
+            // Transfer sneaker to the marketplace
+            sneakerTokenContract.transferToMarket(address(this), tokenId, amount, msg.sender);
+        }
+
+        // Create the listing
         listings[tokenId] = Listing({
             seller: msg.sender,
             price: price,
             shareAmt: amount,
             bidProcess: false,
-            bidEndTime: 0
+            bidEndTime: 0,
+            isFractional: isFractional
         });
+
         activeListingIds.push(tokenId);
+
         emit SneakerListed(tokenId, msg.sender, amount, price);
     }
 
@@ -145,37 +170,48 @@ contract SneakerMarketplace is IERC1155Receiver {
 
     function purchaseSneaker(uint256 tokenId, uint256 amount) public payable {
         Listing memory listing = listings[tokenId];
-        uint256 totalPrice = listing.price * amount;
+        uint256 totalPrice;
+
         require(listing.price > 0, "This listing does not exist");
-        require(
-            amount <= listing.shareAmt,
-            "Insufficent sneaker shares remaining"
-        );
+        require(amount <= listing.shareAmt, "Insufficient sneaker shares remaining");
+
+        // Calculate total price based on whether it's fractional or not
+        if (listing.isFractional) {
+            // For fractional shares, price is per 100 shares, so we need to calculate the portion
+            totalPrice = (listing.price * amount) / 100;
+        } else {
+            totalPrice = listing.price * amount;
+        }
+
         require(
             msg.value >= totalPrice + ((totalPrice * commissionFee) / 100),
-            "Insufficent funds to purchase this sneaker"
+            "Insufficient funds to purchase this sneaker"
         );
+
         address payable seller = payable(listing.seller);
         seller.transfer(totalPrice);
+
+        // Transfer shares to the buyer
         sneakerTokenContract.transferSneakerToken(msg.sender, tokenId, amount);
+
+        // Update or remove the listing
         if (amount < listing.shareAmt) {
             listings[tokenId].shareAmt -= amount;
         } else {
             for (uint256 i = 0; i < activeListingIds.length; i++) {
                 if (activeListingIds[i] == tokenId) {
-                    activeListingIds[i] = activeListingIds[
-                        activeListingIds.length - 1
-                    ];
+                    activeListingIds[i] = activeListingIds[activeListingIds.length - 1];
                     activeListingIds.pop();
                     break;
                 }
             }
             delete listings[tokenId];
         }
+
         emit SneakerPurchased(tokenId, msg.sender, seller, amount, totalPrice);
     }
 
-    //  need to implement 3 minute rule for last minute bids
+    //  Solidity does not support time based functions so this is only a simulation of how the function would work
     function placeBid(uint256 tokenId, uint256 amount, uint256 price) public payable {
         Listing memory listing = listings[tokenId];
         require(listing.price > 0, "This listing does not exist");
@@ -269,5 +305,31 @@ contract SneakerMarketplace is IERC1155Receiver {
         winningBid.bidAmount,
         winningBid.bidPrice
     );
+}
+
+function redeemSneaker(uint256 tokenId) public {
+    Listing memory listing = listings[tokenId];
+    require(!listing.isFractional, "Fractional shares cannot be redeemed");
+    
+    // Check if the caller has a balance of the token
+    uint256 balance = sneakerTokenContract.balanceOf(msg.sender, tokenId);
+    require(balance == 1, "You must own exactly 1 token to redeem the sneaker");
+
+    // Burn the token to redeem the physical sneaker
+    sneakerTokenContract.burnSneakerToken(tokenId, 1);
+
+    emit SneakerRedeemed(tokenId, msg.sender);
+}
+
+function getHighestBid(uint256 tokenId) public view returns (Bid memory highest) {
+    Bid[] memory tokenBids = bids[tokenId];
+    require(tokenBids.length > 0, "No bids for this token");
+
+    highest = tokenBids[0];
+    for (uint256 i = 1; i < tokenBids.length; i++) {
+        if (tokenBids[i].bidPrice > highest.bidPrice) {
+            highest = tokenBids[i];
+        }
+    }
 }
 }
