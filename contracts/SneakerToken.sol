@@ -6,9 +6,8 @@ import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155URIStorage.sol";
 contract SneakerToken is ERC1155URIStorage {
     uint256 public _tokenIds = 0;
     address public contractOwner;
-    address public marketplace;
+
     mapping(uint256 => address[]) public sneakerOwners;
-    mapping(uint256 => mapping(address => bool)) private isSneakerOwner;
     mapping(uint256 => uint256) public maxShares;
 
     event MintSNKT(
@@ -53,10 +52,6 @@ contract SneakerToken is ERC1155URIStorage {
         _;
     }
 
-    function setMarketplace(address _marketplace) public onlyOwner {
-        marketplace = _marketplace;
-    }
-
     function mintSneakerToken(
         address to,
         uint256 amount,
@@ -68,7 +63,6 @@ contract SneakerToken is ERC1155URIStorage {
         _setURI(newTokenId, metadataURI);
         maxShares[newTokenId] = amount;
         sneakerOwners[newTokenId].push(to);
-        isSneakerOwner[newTokenId][to] = true;
         emit MintSNKT(to, newTokenId, amount, metadataURI);
         return newTokenId;
     }
@@ -83,12 +77,30 @@ contract SneakerToken is ERC1155URIStorage {
             "Insufficent balance to sell"
         );
         safeTransferFrom(msg.sender, to, tokenId, amount, "");
-        if (!isSneakerOwner[tokenId][to]) {
-            sneakerOwners[tokenId].push(to);
-            isSneakerOwner[tokenId][to] = true;
+        address[] storage owners = sneakerOwners[tokenId];
+        bool alreadyOwns = false;
+        for (uint i = 0; i < owners.length; i++) {
+            if (owners[i] == to) {
+                alreadyOwns = true;
+            }
         }
+        if (!alreadyOwns) {
+            owners.push(to);
+        }
+        sneakerOwners[tokenId].push(to);
         if (balanceOf(msg.sender, tokenId) == 0) {
-            isSneakerOwner[tokenId][msg.sender] = false;
+            uint256 len = owners.length;
+            for (uint256 i = 0; i < len; i++) {
+                if (owners[i] == msg.sender) {
+                    // 2) Swap with last element (if not already last)
+                    if (i != len - 1) {
+                        owners[i] = owners[len - 1];
+                    }
+                    // 3) Pop the last element
+                    owners.pop();
+                    break;
+                }
+            }
         }
         emit TransferSNKT(msg.sender, to, tokenId, amount);
     }
@@ -104,75 +116,54 @@ contract SneakerToken is ERC1155URIStorage {
             "Insufficient balance to transfer to market"
         );
         safeTransferFrom(originalOwner, to, tokenId, amount, "");
-        if (!isSneakerOwner[tokenId][to]) {
-            sneakerOwners[tokenId].push(to);
-            isSneakerOwner[tokenId][to] = true;
-        }
-        if (balanceOf(originalOwner, tokenId) == 0) {
-            isSneakerOwner[tokenId][originalOwner] = false;
-        }
     }
 
     function burnSneakerToken(
         uint256 tokenId,
         uint256 amount
-    ) public validToken(tokenId) {
-        // Allow marketplace to burn tokens on behalf of owners
-        if (msg.sender != marketplace) {
-            require(
-                balanceOf(msg.sender, tokenId) > 0,
-                "Caller does not own this sneaker"
-            );
-            _burn(msg.sender, tokenId, amount);
-        } else {
-            // For marketplace, we need to check the balance of the original owner
-            address owner = sneakerOwners[tokenId][0]; // Get the first owner
-            
-            // To print out these values, you can use the `emit` keyword to log events, as Solidity does not support console.log directly.
-            emit BurnSNKT(owner, tokenId, balanceOf(owner, tokenId));
-            emit BurnSNKT(owner, tokenId, amount);
-            require(
-                balanceOf(owner, tokenId) >= amount,
-                "Insufficient amount to burn"
-            );
-            _burn(owner, tokenId, amount);
-        }
+    ) public sneakerOwner(tokenId) validToken(tokenId) {
+        _burn(msg.sender, tokenId, amount);
+        delete (sneakerOwners[tokenId]);
+        delete (maxShares[tokenId]);
         emit BurnSNKT(msg.sender, tokenId, amount);
     }
 
     function isOwnerOfSneaker(
         uint256 tokenId,
-        address _address
+        address account
     ) public view validToken(tokenId) returns (bool) {
-        return isSneakerOwner[tokenId][_address];
+        address[] storage owners = sneakerOwners[tokenId];
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == account) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isSoleOwner(
+        uint256 tokenId,
+        address account
+    ) public view validToken(tokenId) returns (bool) {
+        if (
+            sneakerOwners[tokenId].length == 1 &&
+            sneakerOwners[tokenId][0] == account
+        ) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function getMaxShares(
+        uint256 tokenId
+    ) public view validToken(tokenId) returns (uint256) {
+        return maxShares[tokenId];
     }
 
     function getSneakerMetadata(
         uint256 tokenId
     ) public view validToken(tokenId) returns (string memory) {
         return uri(tokenId);
-    }
-
-    function splitSneakerToken(
-    uint256 tokenId,
-    uint256 shares,
-    address owner
-    ) public validToken(tokenId) sneakerOwner(tokenId) {
-        require(shares > 1, "Shares must be greater than 1");
-        require(
-            balanceOf(owner, tokenId) == 1,
-            "Only a single token can be split into shares"
-        );
-
-        // Burn the original token
-        _burn(owner, tokenId, 1);
-
-        // Mint fractional shares
-        _mint(owner, tokenId, shares, "");
-
-        // Update the maxShares mapping to reflect the new share count
-        maxShares[tokenId] = shares;
-
-        emit MintSNKT(owner, tokenId, shares, uri(tokenId));
     }
 }
