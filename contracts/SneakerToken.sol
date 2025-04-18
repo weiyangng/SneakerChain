@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC1155/extensions/ERC1155URIStorage.sol";
 contract SneakerToken is ERC1155URIStorage {
     uint256 public _tokenIds = 0;
     address public contractOwner;
+    address public marketplace;
     mapping(uint256 => address[]) public sneakerOwners;
     mapping(uint256 => mapping(address => bool)) private isSneakerOwner;
     mapping(uint256 => uint256) public maxShares;
@@ -50,6 +51,10 @@ contract SneakerToken is ERC1155URIStorage {
             "This is not a valid token"
         );
         _;
+    }
+
+    function setMarketplace(address _marketplace) public onlyOwner {
+        marketplace = _marketplace;
     }
 
     function mintSneakerToken(
@@ -111,12 +116,27 @@ contract SneakerToken is ERC1155URIStorage {
     function burnSneakerToken(
         uint256 tokenId,
         uint256 amount
-    ) public sneakerOwner(tokenId) validToken(tokenId) {
-        require(
-            balanceOf(msg.sender, tokenId) >= amount,
-            "Insufficient amount to burn"
-        );
-        _burn(msg.sender, tokenId, amount);
+    ) public validToken(tokenId) {
+        // Allow marketplace to burn tokens on behalf of owners
+        if (msg.sender != marketplace) {
+            require(
+                balanceOf(msg.sender, tokenId) > 0,
+                "Caller does not own this sneaker"
+            );
+            _burn(msg.sender, tokenId, amount);
+        } else {
+            // For marketplace, we need to check the balance of the original owner
+            address owner = sneakerOwners[tokenId][0]; // Get the first owner
+            
+            // To print out these values, you can use the `emit` keyword to log events, as Solidity does not support console.log directly.
+            emit BurnSNKT(owner, tokenId, balanceOf(owner, tokenId));
+            emit BurnSNKT(owner, tokenId, amount);
+            require(
+                balanceOf(owner, tokenId) >= amount,
+                "Insufficient amount to burn"
+            );
+            _burn(owner, tokenId, amount);
+        }
         emit BurnSNKT(msg.sender, tokenId, amount);
     }
 
@@ -131,5 +151,28 @@ contract SneakerToken is ERC1155URIStorage {
         uint256 tokenId
     ) public view validToken(tokenId) returns (string memory) {
         return uri(tokenId);
+    }
+
+    function splitSneakerToken(
+    uint256 tokenId,
+    uint256 shares,
+    address owner
+    ) public validToken(tokenId) sneakerOwner(tokenId) {
+        require(shares > 1, "Shares must be greater than 1");
+        require(
+            balanceOf(owner, tokenId) == 1,
+            "Only a single token can be split into shares"
+        );
+
+        // Burn the original token
+        _burn(owner, tokenId, 1);
+
+        // Mint fractional shares
+        _mint(owner, tokenId, shares, "");
+
+        // Update the maxShares mapping to reflect the new share count
+        maxShares[tokenId] = shares;
+
+        emit MintSNKT(owner, tokenId, shares, uri(tokenId));
     }
 }
