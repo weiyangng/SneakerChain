@@ -6,6 +6,9 @@ module.exports = {
   networks: {
     localhost: {
       url: "http://127.0.0.1:8545"
-    }
+    },
+    hardhat: {
+      timeout: 200000, // Increase timeout to 200 seconds
+    },
   }
 };
