@@ -1,8 +1,88 @@
 const hre = require("hardhat");
 const readlineSync = require("readline-sync");
+const { ethers } = require("hardhat");
+
+let provider;
+let sneakerToken;
+let marketplace;
+
+async function checkConnection() {
+    try {
+        await provider.getNetwork();
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function reconnect() {
+    try {
+        provider = hre.ethers.provider;
+        const [deployer] = await hre.ethers.getSigners();
+        
+        // Reattach contracts
+        const SneakerToken = await hre.ethers.getContractFactory("SneakerToken");
+        sneakerToken = SneakerToken.attach(sneakerToken.target);
+        
+        const SneakerMarketplace = await hre.ethers.getContractFactory("SneakerMarketplace");
+        marketplace = SneakerMarketplace.attach(marketplace.target);
+        
+        return deployer;
+    } catch (error) {
+        throw error;
+    }
+}
+
+async function executeWithRetry(operation, retries = 5, delay = 3000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            // Check connection health before each operation
+            if (!await checkConnection()) {
+                await reconnect();
+            }
+            return await operation();
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
+
+async function readWithRetry(contract, method, ...args) {
+    return executeWithRetry(async () => {
+        try {
+            return await contract[method](...args);
+        } catch (error) {
+            if (error.message.includes("ECONNRESET")) {
+                // For read operations, we can be more aggressive with retries
+                throw new Error("Connection reset during read operation");
+            }
+            throw error;
+        }
+    }, 5, 3000); // More retries and longer delay for reads
+}
+
+async function connectToNetwork(retries = 3, delay = 2000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const [deployer] = await hre.ethers.getSigners();
+            console.log(`Attempt ${i + 1}/${retries} to connect to network...`);
+            // Test the connection
+            await deployer.provider.getNetwork();
+            console.log("Successfully connected to network!");
+            return deployer;
+        } catch (error) {
+            if (i === retries - 1) throw error;
+            console.log(`Connection attempt ${i + 1} failed. Retrying in ${delay/1000} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
 
 async function main() {
     try {
+        // Initial setup
+        provider = hre.ethers.provider;
         const [deployer] = await hre.ethers.getSigners();
         console.log("Using deployer account:", deployer.address);
 
@@ -12,15 +92,17 @@ async function main() {
 
         // Attach to deployed contracts
         const SneakerToken = await hre.ethers.getContractFactory("SneakerToken");
-        const sneakerToken = SneakerToken.attach(tokenAddress);
+        sneakerToken = SneakerToken.attach(tokenAddress);
 
         const SneakerMarketplace = await hre.ethers.getContractFactory("SneakerMarketplace");
-        const marketplace = SneakerMarketplace.attach(marketplaceAddress);
+        marketplace = SneakerMarketplace.attach(marketplaceAddress);
 
         // Verify contracts are connected
         try {
-            await sneakerToken._tokenIds();
-            await marketplace.commissionFee();
+            await executeWithRetry(async () => {
+                await sneakerToken._tokenIds();
+                await marketplace.commissionFee();
+            });
             console.log("Successfully connected to contracts!");
         } catch (error) {
             console.error("Error connecting to contracts. Please make sure:");
@@ -43,24 +125,28 @@ async function main() {
             const choice = readlineSync.question("Enter your choice: ");
 
             try {
+                // Check connection before each operation
+                if (!await checkConnection()) {
+                    await reconnect();
+                }
+
                 switch (choice) {
                     case "1": // Mint Sneaker
                         const amount = readlineSync.question("Enter amount of shares (1 for whole sneaker, 100 for fractional): ");
                         const metadata = readlineSync.question("Enter sneaker metadata URI: ");
-                        const tx = await sneakerToken.mintSneakerToken(deployer.address, amount, metadata);
-                        const receipt = await tx.wait();
-
-                        // Parse the tokenId from the Mint event
-                        const mintEvent = receipt.logs.find(log =>
-                            log.fragment && log.fragment.name === "TransferSingle"
-                        );
-
-                        if (mintEvent) {
-                            const tokenId = mintEvent.args.id;
-                            console.log(`Sneaker minted successfully. Token ID: ${tokenId}`);
-                        } else {
-                            console.log("Sneaker minted successfully. (Token ID could not be retrieved from logs)");
-                        }
+                        await executeWithRetry(async () => {
+                            const tx = await sneakerToken.mintSneakerToken(deployer.address, amount, metadata);
+                            const receipt = await tx.wait();
+                            const mintEvent = receipt.logs.find(log =>
+                                log.fragment && log.fragment.name === "TransferSingle"
+                            );
+                            if (mintEvent) {
+                                const tokenId = mintEvent.args.id;
+                                console.log(`Sneaker minted successfully. Token ID: ${tokenId}`);
+                            } else {
+                                console.log("Sneaker minted successfully. (Token ID could not be retrieved from logs)");
+                            }
+                        });
                         break;
 
                     case "2": // List Sneaker
@@ -70,41 +156,40 @@ async function main() {
                         const isFractional = readlineSync.question("Is this a fractional listing? (yes/no): ").toLowerCase() === "yes";
 
                         // Ownership check
-                        const isOwner = await sneakerToken.isOwnerOfSneaker(tokenId, deployer.address);
+                        const isOwner = await executeWithRetry(() => sneakerToken.isOwnerOfSneaker(tokenId, deployer.address));
                         if (!isOwner) {
                             console.error("You do not own this sneaker token.");
                             break;
                         }
 
                         // Balance check
-                        const balance = await sneakerToken.balanceOf(deployer.address, tokenId);
+                        const balance = await executeWithRetry(() => sneakerToken.balanceOf(deployer.address, tokenId));
                         if (balance < listAmount) {
                             console.error(`Insufficient shares. You own ${balance}, but tried to list ${listAmount}.`);
                             break;
                         }
 
                         // Approval check
-                        const isApproved = await sneakerToken.isApprovedForAll(deployer.address, marketplace.target);
+                        const isApproved = await executeWithRetry(() => sneakerToken.isApprovedForAll(deployer.address, marketplace.target));
                         if (!isApproved) {
                             console.log("Approving marketplace to manage your tokens...");
-                            const approveTx = await sneakerToken.setApprovalForAll(marketplace.target, true);
-                            await approveTx.wait();
+                            await executeWithRetry(async () => {
+                                const approveTx = await sneakerToken.setApprovalForAll(marketplace.target, true);
+                                await approveTx.wait();
+                            });
                             console.log("Marketplace approved.");
                         }
 
-                        try {
+                        await executeWithRetry(async () => {
                             const priceInWei = hre.ethers.parseEther(price);
                             const listTx = await marketplace.listSneaker(tokenId, listAmount, priceInWei, isFractional);
                             await listTx.wait();
-
                             console.log("\nSneaker listed successfully!");
                             console.log(`Token ID: ${tokenId}`);
                             console.log(`Shares Listed: ${listAmount}`);
                             console.log(`Price per Share: ${price} ETH`);
                             console.log(`Listing Contract: ${marketplace.target}`);
-                        } catch (err) {
-                            console.error("Listing failed:", err.message);
-                        }
+                        });
                         break;
 
                     case "3": // Buy Sneaker
@@ -161,17 +246,17 @@ async function main() {
 
                     case "4": // Place Bid
                         const bidTokenId = readlineSync.question("Enter token ID: ");
-                        const bidAmount = readlineSync.question("Enter bid amount (number of shares): ");
-                        const bidPrice = readlineSync.question("Enter bid price per share (in ETH): ");
-
                         try {
+                            const bidPrice = readlineSync.question("Enter bid price (in ETH): ");
                             const userBidPrice = hre.ethers.parseEther(bidPrice);
-                            const bidTx = await marketplace.placeBid(bidTokenId, bidAmount, userBidPrice, {
-                                value: userBidPrice * BigInt(bidAmount),
+                            
+                            await executeWithRetry(async () => {
+                                const bidTx = await marketplace.placeBid(bidTokenId, {
+                                    value: userBidPrice
+                                });
+                                await bidTx.wait();
+                                console.log("Bid placed successfully.");
                             });
-                            await bidTx.wait();
-
-                            console.log("Bid placed successfully.");
                         } catch (error) {
                             console.error("Bid failed:", error.message);
                         }
@@ -194,20 +279,7 @@ async function main() {
                         const checkTokenId = readlineSync.question("Enter token ID: ");
 
                         try {
-                            const listing = await marketplace.getListing(checkTokenId);
-
-                            if (listing.price === 0n && listing.shareAmt === 0n) {
-                                console.log("No active listing found for this token ID.");
-                                break;
-                            }
-
-                            console.log("\nListing Details");
-                            console.log("------------------");
-                            console.log(`Token ID: ${checkTokenId}`);
-                            console.log(`Seller: ${listing.seller}`);
-                            console.log(`Price per Share: ${hre.ethers.formatEther(listing.price)} ETH`);
-                            console.log(`Available Shares: ${listing.shareAmt}`);
-                            console.log(`Bidding Status: ${listing.bidProcess ? "Active" : "Inactive"}`);
+                            await checkListing(marketplace, checkTokenId);
                         } catch (error) {
                             console.error("Failed to retrieve listing:", error.message);
                         }
@@ -225,6 +297,7 @@ async function main() {
                 }
             } catch (error) {
                 console.error("An error occurred:", error.message);
+                console.log("Please try the operation again.");
             }
         }
     } catch (error) {
@@ -257,6 +330,37 @@ async function viewMintedSneakers(sneakerToken, address) {
         }
     } catch (error) {
         console.error("Error viewing sneakers:", error.message);
+    }
+}
+
+async function checkListing(marketplace, tokenId) {
+    try {
+        const listing = await readWithRetry(marketplace, "getListing", tokenId);
+        
+        if (listing.price === 0n && listing.shareAmt === 0n) {
+            console.log("No active listing found for this token ID.");
+            return;
+        }
+
+        console.log("\nListing Details");
+        console.log("------------------");
+        console.log(`Token ID: ${tokenId}`);
+        console.log(`Price per Share: ${ethers.formatEther(listing.price)} ETH`);
+        console.log(`Available Shares: ${listing.shareAmt}`);
+        
+        // Show bidding status
+        if (listing.initialBidSubmitted) {
+            const currentBid = await readWithRetry(marketplace, "currentBid", tokenId);
+            if (currentBid.bidPrice > 0n) {
+                console.log(`Current Bid: ${ethers.formatEther(currentBid.bidPrice)} ETH`);
+            }
+        }
+    } catch (error) {
+        if (error.message.includes("This listing does not exist")) {
+            console.log("No active listing found for this token ID.");
+        } else {
+            console.error("Failed to retrieve listing:", error.message);
+        }
     }
 }
 
