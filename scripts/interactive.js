@@ -197,7 +197,7 @@ async function main() {
                         const buyAmount = readlineSync.question("Enter amount to buy: ");
 
                         try {
-                            const listing = await marketplace.getListing(buyTokenId);
+                            const listing = await readWithRetry(marketplace, "getListing", buyTokenId);
 
                             if (listing.price === 0n || listing.shareAmt === 0n) {
                                 console.log("No active listing found for this token ID.");
@@ -220,7 +220,6 @@ async function main() {
                             console.log(`Shares: ${buyAmount}`);
                             console.log(`Price per share: ${hre.ethers.formatEther(pricePerShare)} ETH`);
                             console.log(`Total (including 5% commission): ${hre.ethers.formatEther(totalToPay)} ETH`);
-                            console.log(`Seller: ${listing.seller}`);
                             console.log("");
 
                             const confirm = readlineSync.question("Proceed with purchase? (yes/no): ");
@@ -229,15 +228,18 @@ async function main() {
                                 break;
                             }
 
-                            const buyTx = await marketplace.purchaseSneaker(buyTokenId, buyAmount, {
-                                value: totalToPay
+                            await executeWithRetry(async () => {
+                                const buyTx = await marketplace.purchaseSneaker(buyTokenId, buyAmount, {
+                                    value: totalToPay
+                                });
+                                await buyTx.wait();
+                                console.log("Sneaker purchased successfully.");
                             });
-                            await buyTx.wait();
-
-                            console.log("Sneaker purchased successfully.");
                         } catch (err) {
                             if (err.message.includes("This listing does not exist")) {
                                 console.log("No active listing found for this token ID.");
+                            } else if (err.message.includes("ECONNRESET")) {
+                                console.log("Connection lost. Please try again.");
                             } else {
                                 console.error("Purchase failed:", err.message);
                             }
