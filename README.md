@@ -4,7 +4,7 @@ SneakerChain is a decentralized marketplace for authenticated physical sneakers,
 
 ---
 
-## 🚀 Features
+## Features
 
 - **Authentication & Provenance**  
   Physical sneakers are authenticated off‑chain, then minted on‑chain as ERC‑1155 tokens, with full ownership history recorded in the metadata.
@@ -24,7 +24,7 @@ SneakerChain is a decentralized marketplace for authenticated physical sneakers,
 
 ---
 
-## 📦 Architecture
+## Architecture
 
 - **SneakerToken.sol**  
   - ERC‑1155 NFT with per‑token URIs and fractional shares  
@@ -37,7 +37,7 @@ SneakerChain is a decentralized marketplace for authenticated physical sneakers,
 
 ---
 
-## 🔧 Prerequisites
+## Prerequisites
 
 - [Node.js (≥16)](https://nodejs.org/)  
 - [Yarn](https://yarnpkg.com/) or npm  
@@ -45,7 +45,7 @@ SneakerChain is a decentralized marketplace for authenticated physical sneakers,
 
 ---
 
-## ⚙️ Installation
+## Installation
 
 ```shell
 git clone https://github.com/your‑org/sneakerchain.git
